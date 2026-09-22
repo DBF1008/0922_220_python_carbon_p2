@@ -1,7 +1,12 @@
 import re
+
+from os.path import exists, getmtime
+from twisted.internet.task import LoopingCall
+
+from carbon import log
 from carbon.conf import OrderedConfigParser
-from carbon.util import parseDestinations
 from carbon.exceptions import CarbonConfigException
+from carbon.util import parseDestinations
 
 
 class RelayRule:
@@ -59,3 +64,54 @@ def loadRelayRules(path):
 
   rules.append(defaultRule)
   return rules
+
+
+class RelayRuleManager(object):
+  def __init__(self, clock=None):
+    self.rules = []
+    self.rules_file = None
+    self.rules_last_read = 0.0
+    self.read_task = LoopingCall(self.read_rules)
+    if clock is not None:
+      self.read_task.clock = clock
+
+  def read_from(self, rules_file):
+    self.rules_file = rules_file
+    self.read_rules()
+    if not self.read_task.running:
+      self.read_task.start(10, now=False)
+
+  def stop(self):
+    if self.read_task.running:
+      self.read_task.stop()
+
+  def read_rules(self):
+    if not exists(self.rules_file):
+      if self.rules:
+        log.err("Relay rules file %s disappeared; keeping current rules" % self.rules_file)
+        return
+      raise CarbonConfigException("Could not read rules file %s" % self.rules_file)
+
+    try:
+      mtime = getmtime(self.rules_file)
+    except OSError:
+      log.err("Failed to get mtime of %s" % self.rules_file)
+      return
+
+    if mtime <= self.rules_last_read:
+      return
+
+    try:
+      new_rules = loadRelayRules(self.rules_file)
+      loaded_mtime = getmtime(self.rules_file)
+    except Exception as error:
+      log.err("Failed to reload relay rules from %s: %s" % (self.rules_file, error))
+      if not self.rules:
+        raise
+      return
+
+    if loaded_mtime < mtime:
+      return
+
+    self.rules = new_rules
+    self.rules_last_read = mtime
