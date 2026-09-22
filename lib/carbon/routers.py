@@ -59,13 +59,18 @@ class RelayRulesRouter(DatapointRouter):
 
   def __init__(self, settings):
     # We need to import relayrules here to avoid circular dependencies.
-    from carbon.relayrules import loadRelayRules
+    from carbon.relayrules import RelayRuleManager
 
     rules_path = settings["relay-rules"]
 
     self.rules_path = rules_path
-    self.rules = loadRelayRules(rules_path)
+    self.rule_manager = RelayRuleManager()
+    self.rule_manager.read_from(rules_path)
     self.destinations = set()
+
+  @property
+  def rules(self):
+    return self.rule_manager.rules
 
   def addDestination(self, destination):
     self.destinations.add(destination)
